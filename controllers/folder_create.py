@@ -101,10 +101,19 @@ class FolderCreateController(BaseController):
         # Проверяем наличие DatasetObjectCollection
         collection = data.get("DatasetObjectCollection")
         if not collection:
-            # Некоторые версии API могут возвращать объект напрямую без обёртки
-            # или ошибку. Выведем содержимое для анализа.
-            self.logger.error(f"Unexpected response structure: {data}")
-            raise ValueError(f"No DatasetObjectCollection in response. Keys: {data.keys()}")
+            # ВЫВОДИМ ПОЛНЫЙ ОТВЕТ СЕРВЕРА НА ЭКРАН
+            print("\n" + "=" * 40)
+            print("ВНИМАНИЕ! СЕРВЕР ВЕРНУЛ НЕОЖИДАННЫЙ ОТВЕТ:")
+            print(data)
+            print("=" * 40 + "\n")
+
+            # Пробуем достать данные, если сервер вернул их напрямую без обертки
+            if "GuidKey" in data:
+                print("Похоже, сервер вернул объект напрямую!")
+                collection = [data]
+            else:
+                raise ValueError(
+                    f"No DatasetObjectCollection in response. Keys: {list(data.keys())}. Server response: {data}")
 
         obj = collection[0]
         guid_key = obj.get("GuidKey")

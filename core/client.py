@@ -95,13 +95,29 @@ class SarusClient:
             return self._dataset_cache[dataset_id]
 
         self._ensure_authenticated()
-
-        # Загружаем описание справочника
         self.dataset.get_description(dataset_id)
-        desc_keys = list(self.dataset_model.raw_response.keys())
-        self.logger.debug(f"Dataset {dataset_id} description keys: {desc_keys}")
-        # Загружаем классы
-        self.class_ctrl.get_classes(dataset_id)
+
+        # Ищем TableName внутри ParameterGroupCollection
+        groups = self.dataset_model.raw_response.get("ParameterGroupCollection", [])
+        table_name = None
+
+        # Пытаемся найти группу, у которой Id совпадает с нашим dataset_id
+        for group in groups:
+            guid_key = group.get("GuidKey", {})
+            if guid_key.get("Id") == dataset_id:
+                table_name = group.get("TableName")
+                break
+
+        # Если не нашли в описании, пробуем кэш
+        if not table_name:
+            table_name = self._table_names_cache.get(dataset_id, "")
+
+        if not table_name:
+            # Для системного справочника файлов можно принудительно задать 'Files'
+            if dataset_id == 16:
+                table_name = "Files"
+            else:
+                raise RuntimeError(f"Не удалось определить TableName для справочника {dataset_id}")
         # Загружаем файловые серверы и выбираем первый (можно изменить логику)
         self.file_server.get_servers()
         self.file_server.select_first()
@@ -234,7 +250,7 @@ class SarusClient:
                     self.logger.warning(
                         f"Основная группа не найдена, используется fallback-группа: {group.get('Caption')} ({guid})")
                     break
-
+        """
         print("\n=== ГРУППЫ ПАРАМЕТРОВ ===")
         for g in groups:
             guid_key = g.get("GuidKey") or {}
@@ -244,6 +260,7 @@ class SarusClient:
             master = g.get("MasterGroupGuidKey")
             print(f"{caption} ({guid}) | slave={bool(slave)} master={bool(master)}")
         print("=== КОНЕЦ ГРУПП ===\n")
+        """
 
         # --- 3. Классы (уже исправлено ранее) ---
         raw_classes = cache.get("class_list", [])
@@ -280,7 +297,6 @@ class SarusClient:
         self.folder.get_folder_info(dataset_id, folder_id)
         return self.folder_model
 
-    # sarus_client/core/client.py (добавить в класс SarusClient)
 
     def create_eri_class(self, dataset_id: int, class_name: str, extensions=None):
         """
@@ -893,7 +909,7 @@ class SarusClient:
 
     def ensure_file_folder(self, folder_name: str) -> int:
         """
-        Создаёт или возвращает ID папки в корне справочника файлов (ID=16).
+        Создаёт или возвращает ID папки в корне справочника файлов.
         После создания выполняет check‑in, чтобы папка не оставалась в режиме редактирования.
         """
         if not hasattr(self, '_file_folder_cache'):
@@ -901,8 +917,8 @@ class SarusClient:
         if folder_name in self._file_folder_cache:
             return self._file_folder_cache[folder_name]
 
-        dataset_id_files = default_config.files_dataset_id  # 16
-        root_parent_id = default_config.files_root_parent_id  # 16 (корень)
+        dataset_id_files = default_config.files_dataset_id
+        root_parent_id = default_config.files_root_parent_id
 
         # Загружаем классы справочника файлов, чтобы найти класс "Папка"
         self.class_ctrl.get_classes(dataset_id_files)
@@ -916,9 +932,15 @@ class SarusClient:
             self._file_folder_cache[folder_name] = existing_id
             return existing_id
 
-        # Информация о корневой папке (корень – сам справочник)
-        root_info = self.get_folder_info(dataset_id_files, root_parent_id)
-        root_guid = root_info.guid
+        # --- ИСПРАВЛЕННАЯ ЛОГИКА ---
+        # Если мы кладем в корень (ID 0) или ID перепутан с ID справочника
+        if root_parent_id == 0 or root_parent_id == dataset_id_files:
+            root_parent_id = 0
+            root_guid = ""
+        else:
+            # Запрашиваем инфу только если это реально существующая вложенная папка
+            root_info = self.get_folder_info(dataset_id_files, root_parent_id)
+            root_guid = root_info.guid
 
         # Создаём папку
         new_id, new_guid = self.folder_create.create_folder(
@@ -933,7 +955,8 @@ class SarusClient:
         )
 
         # Check‑in, чтобы папка не висела в режиме редактирования
-        self._checkin_folder(dataset_id_files, new_id)
+        self.folder_create.checkin_folder(dataset_id_files, new_id, new_guid)
+
         self._file_folder_cache[folder_name] = new_id
         self.logger.info(f"Создана и подтверждена папка {folder_name} (ID={new_id}) в справочнике файлов")
         return new_id
@@ -971,8 +994,8 @@ class SarusClient:
             self.logger.warning(f"Error searching for folder: {e}")
             return None
 
+"""
     def _checkin_folder(self, dataset_id: int, folder_id: int):
-        """Подтверждает создание папки, используя существующий метод checkin."""
         # Получаем полную информацию о папке
         folder_info = self.get_folder_info(dataset_id, folder_id)
         # Формируем DatasetObjectCollection из полученных данных
@@ -991,3 +1014,4 @@ class SarusClient:
             parameter_group_collection=self._load_dataset_info(dataset_id)["parameter_groups"]
         )
         self.logger.info(f"Check-in выполнен для папки {folder_id}")
+"""

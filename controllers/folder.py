@@ -25,8 +25,17 @@ class FolderController(BaseController):
         self._handle_response(response)
         data = response.json()
         collection = data.get("DatasetObjectCollection")
-        if not collection:
-            raise ValueError("No DatasetObjectCollection in response")
+
+        # Если ключа вообще нет в ответе
+        if collection is None:
+            raise ValueError(f"Неожиданный ответ сервера: нет ключа DatasetObjectCollection. Ответ: {data}")
+
+        # Если сервер вернул пустой список (объект не найден)
+        if len(collection) == 0:
+            self.logger.error(
+                f"Папка не найдена! Сервер вернул пустой список для GroupId={group_id}, ObjectId={object_id}")
+            raise ValueError(
+                f"Объект (папка) с ID {object_id} в группе {group_id} не существует на сервере или к нему нет доступа.")
         obj = collection[0]
         guid_key = obj.get("GuidKey")
         if not guid_key:

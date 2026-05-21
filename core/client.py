@@ -101,35 +101,27 @@ class SarusClient:
         groups = self.dataset_model.raw_response.get("ParameterGroupCollection", [])
         table_name = None
 
-        # Пытаемся найти группу, у которой Id совпадает с нашим dataset_id
         for group in groups:
             guid_key = group.get("GuidKey", {})
             if guid_key.get("Id") == dataset_id:
                 table_name = group.get("TableName")
                 break
 
-        # Если не нашли в описании, пробуем кэш
+        # Если не нашли, пробуем кэш каталога
         if not table_name:
             table_name = self._table_names_cache.get(dataset_id, "")
 
+        # Если всё ещё пусто – для справочника файлов ставим 'Files'
         if not table_name:
-            # Для системного справочника файлов можно принудительно задать 'Files'
             if dataset_id == 16:
                 table_name = "Files"
+                self.logger.info("Для справочника файлов (ID=16) установлено TableName='Files'")
             else:
-                raise RuntimeError(f"Не удалось определить TableName для справочника {dataset_id}")
-        # Загружаем файловые серверы и выбираем первый (можно изменить логику)
+                self.logger.warning(f"TableName не найден для dataset_id={dataset_id}")
+
+        # Загружаем файловые серверы
         self.file_server.get_servers()
         self.file_server.select_first()
-
-        table_name = self.dataset_model.raw_response.get("TableName")
-        if not table_name:
-            # Пробуем взять из кэша, полученного из каталога
-            table_name = self._table_names_cache.get(dataset_id, "")
-            if table_name:
-                self.logger.info(f"TableName для справочника {dataset_id} взят из кэша каталога: {table_name}")
-            else:
-                self.logger.warning(f"TableName не найден для dataset_id={dataset_id} ни в описании, ни в каталоге")
 
         dataset_guid = self.dataset_model.raw_response.get("Guid", "")
         cache = {
@@ -140,7 +132,7 @@ class SarusClient:
             "file_server_port": self.file_server_model.port,
             "parameter_groups": self.dataset_model.parameter_group_collection,
             "dataset_guid": dataset_guid,
-            "table_name": table_name,  # теперь содержит корректное имя или пустую строку
+            "table_name": table_name,
         }
         self._dataset_cache[dataset_id] = cache
         return cache
